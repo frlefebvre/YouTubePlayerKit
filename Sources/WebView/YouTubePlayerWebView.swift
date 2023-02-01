@@ -44,8 +44,8 @@ final class YouTubePlayerWebView: WKWebView {
                 // Initialize WebView Configuration
                 let configuration = WKWebViewConfiguration()
                 #if !os(macOS)
-                // Allows inline media playback
-                configuration.allowsInlineMediaPlayback = true
+                // Disables inline media playback
+                configuration.allowsInlineMediaPlayback = false
                 #endif
                 // No media types requiring user action for playback
                 configuration.mediaTypesRequiringUserActionForPlayback = []
