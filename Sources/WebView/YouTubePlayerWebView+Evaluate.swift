@@ -5,7 +5,7 @@ import Foundation
 extension YouTubePlayerWebView {
     
     /// A JavaScript
-    struct JavaScript: Codable, Hashable {
+    struct JavaScript: Codable, Hashable, Sendable {
         
         // MARK: Properties
         
@@ -43,6 +43,28 @@ extension YouTubePlayerWebView.JavaScript {
         .init("\(YouTubePlayer.HTML.playerVariableName).\(`operator`)")
     }
     
+    /// Create YouTubePlayer JavaScript with function
+    /// - Parameters:
+    ///   - function: The function name
+    ///   - parameters: The parameters.
+    static func player(
+        function: String,
+        parameters: String...
+    ) -> Self {
+        self.player("\(function)(\(parameters.joined(separator: ", ")))")
+    }
+    
+}
+
+// MARK: - YouTubePlayerWebView+JavaScript+embedInAnonymousFunction
+
+extension YouTubePlayerWebView.JavaScript {
+    
+    /// Embed JavaScript in an anonymous function
+    func embedInAnonymousFunction() -> Self {
+        .init("(function(){\(self.rawValue)})()")
+    }
+    
 }
 
 // MARK: - YouTubePlayerWebView+evaluate
@@ -58,7 +80,7 @@ extension YouTubePlayerWebView {
     func evaluate<Response>(
         javaScript: JavaScript,
         converter: JavaScriptEvaluationResponseConverter<Response>,
-        completion: @escaping (Result<Response, YouTubePlayerAPIError>) -> Void
+        completion: @escaping (Result<Response, YouTubePlayer.APIError>) -> Void
     ) {
         // Initialize evaluate javascript closure
         let evaluateJavaScript = { [weak self] in
@@ -67,7 +89,7 @@ extension YouTubePlayerWebView {
                 javaScript.rawValue
             ) { javaScriptResponse, error in
                 // Initialize Result
-                let result: Result<Response, YouTubePlayerAPIError> = {
+                let result: Result<Response, YouTubePlayer.APIError> = {
                     // Check if an Error is available
                     if let error = error {
                         // Return failure with YouTubePlayerAPIError
@@ -111,8 +133,20 @@ extension YouTubePlayerWebView {
             // Switch on player state
             switch self.player?.state {
             case nil, .idle:
+                // Verify a player is available
+                guard let player = self.player else {
+                    // Otherwise return out of function and complete with failure
+                    return completion(
+                        .failure(
+                            .init(
+                                javaScript: javaScript.rawValue,
+                                reason: "YouTubePlayer has been deallocated"
+                            )
+                        )
+                    )
+                }
                 // Subscribe to state publisher
-                self.player?
+                let cancellable = player
                     .statePublisher
                     // Only include non idle states
                     .filter { $0.isIdle == false }
@@ -122,7 +156,11 @@ extension YouTubePlayerWebView {
                         // Execute the JavaScript
                         executeJavaScript()
                     }
-                    .store(in: &self.cancellables)
+                // Dispatch on main queue
+                DispatchQueue.main.async { [weak self] in
+                    // Retain cancellable
+                    self?.cancellables.insert(cancellable)
+                }
             case .ready, .error:
                 // Synchronously execute the JavaScript
                 executeJavaScript()
@@ -133,16 +171,19 @@ extension YouTubePlayerWebView {
         }
     }
     
-    /// Evaluates the given JavaScript
-    /// - Parameter javaScript: The JavaScript that should be evaluated
+    /// Evaluates the JavaScript
+    /// - Parameters:
+    ///   - javaScript: The JavaScript that should be evaluated
+    ///   - completion: The completion closure when the JavaScript has finished executing
     func evaluate(
-        javaScript: JavaScript
+        javaScript: JavaScript,
+        completion: ((Result<Void, YouTubePlayer.APIError>) -> Void)? = nil
     ) {
         // Evaluate JavaScript with `empty` Converter
         self.evaluate(
             javaScript: javaScript,
             converter: .empty,
-            completion: { _ in }
+            completion: { completion?($0) }
         )
     }
     
@@ -161,7 +202,7 @@ extension YouTubePlayerWebView {
         typealias JavaScriptResponse = Any?
         
         /// The Convert closure typealias
-        typealias Convert = (JavaScript, JavaScriptResponse) -> Result<Output, YouTubePlayerAPIError>
+        typealias Convert = (JavaScript, JavaScriptResponse) -> Result<Output, YouTubePlayer.APIError>
         
         // MARK: Properties
         
@@ -188,7 +229,7 @@ extension YouTubePlayerWebView {
         func callAsFunction(
             _ javaScript: JavaScript,
             _ javaScriptResponse: JavaScriptResponse
-        ) -> Result<Output, YouTubePlayerAPIError> {
+        ) -> Result<Output, YouTubePlayer.APIError> {
             self.convert(
                 javaScript,
                 javaScriptResponse

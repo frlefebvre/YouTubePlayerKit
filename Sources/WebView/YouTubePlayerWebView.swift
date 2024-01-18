@@ -47,6 +47,10 @@ final class YouTubePlayerWebView: WKWebView {
                 // Disables inline media playback
                 configuration.allowsInlineMediaPlayback = false
                 #endif
+                // Disable text interaction / selection
+                if #available(iOS 14.5, macOS 11.3, *) {
+                    configuration.preferences.isTextInteractionEnabled = false
+                }
                 // No media types requiring user action for playback
                 configuration.mediaTypesRequiringUserActionForPlayback = []
                 // Return configuration
@@ -84,6 +88,16 @@ final class YouTubePlayerWebView: WKWebView {
     }
     #endif
     
+    #if os(macOS)
+    /// ScrollWheel Event
+    /// - Parameter event: The NSEvent
+    override func scrollWheel(with event: NSEvent) {
+        // Explicity overriden without super invocation
+        // to disable scrolling on macOS
+        self.nextResponder?.scrollWheel(with: event)
+    }
+    #endif
+    
 }
 
 // MARK: - Setup
@@ -112,11 +126,8 @@ private extension YouTubePlayerWebView {
         self.navigationDelegate = self
         // Set ui delegate
         self.uiDelegate = self
-        #if !os(macOS)
-        // Set clear background color
-        self.backgroundColor = .clear
-        // Disable opaque
-        self.isOpaque = false
+        // Disable link preview
+        self.allowsLinkPreview = false
         // Set autoresizing masks
         self.autoresizingMask = {
             #if os(macOS)
@@ -125,8 +136,18 @@ private extension YouTubePlayerWebView {
             return [.flexibleWidth, .flexibleHeight]
             #endif
         }()
+        if #available(iOS 15.0, macOS 12.0, *) {
+            self.underPageBackgroundColor = .clear
+        }
+        #if !os(macOS)
+        // Set clear background color
+        self.backgroundColor = .clear
+        // Disable opaque
+        self.isOpaque = false
         // Disable scrolling
         self.scrollView.isScrollEnabled = false
+        self.scrollView.showsVerticalScrollIndicator = false
+        self.scrollView.showsHorizontalScrollIndicator = false
         // Disable bounces of ScrollView
         self.scrollView.bounces = false
         #endif
@@ -185,6 +206,10 @@ extension YouTubePlayerWebView {
             .automaticallyAdjustsContentInsets
             ?? true
         #endif
+        // Set HTML element fullscreen enabled if fullscreen mode is set to web
+        // which results in a fullscreen YouTube player web user interface
+        // instead of the system fullscreen AVPlayerViewController
+        self.configuration.preferences.isHTMLElementFullscreenEnabled = player.configuration.fullscreenMode == .web
         // Set custom user agent
         self.customUserAgent = player.configuration.customUserAgent
         // Load HTML string
@@ -194,6 +219,33 @@ extension YouTubePlayerWebView {
         )
         // Return success
         return true
+    }
+    
+}
+
+// MARK: - WKPreferences+isFullscreenEnabled
+
+private extension WKPreferences {
+    
+    /// The `fullScreenEnabled` key used as fallback under iOS 15.4 and macOS 12.3
+    static let fullScreenEnabledKey = "fullScreenEnabled"
+    
+    /// Bool value if fullscreen HTML element is enabled.
+    var isHTMLElementFullscreenEnabled: Bool {
+        get {
+            if #available(iOS 15.4, macOS 12.3, *) {
+                return self.isElementFullscreenEnabled
+            } else {
+                return (self.value(forKey: Self.fullScreenEnabledKey) as? Bool) == true
+            }
+        }
+        set {
+            if #available(iOS 15.4, macOS 12.3, *) {
+                self.isElementFullscreenEnabled = newValue
+            } else {
+                self.setValue(newValue, forKey: Self.fullScreenEnabledKey)
+            }
+        }
     }
     
 }
